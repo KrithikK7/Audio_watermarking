@@ -658,6 +658,15 @@ def main():
         else:
             i += 1
     if count_pilots == 0:
+        try_metadata_fallback(
+            args,
+            outfile,
+            matched_row,
+            row_source,
+            match_strategy,
+            infile_sha,
+            "0 pilot frames matched",
+        )
         fail(outfile, args.log_csv, args.infile,
              "0 pilot frames matched. Nonce or params likely wrong.",
              extras={"debug": frame_debug},
@@ -679,6 +688,15 @@ def main():
     try:
         header, body, kid, typ, flags, pnonce, ver, tag, crc = parse_payload(payload_bytes)
     except Exception as e:
+        try_metadata_fallback(
+            args,
+            outfile,
+            matched_row,
+            row_source,
+            match_strategy,
+            infile_sha,
+            f"Failed to parse payload: {e}",
+        )
         fail(outfile, args.log_csv, args.infile, f"Failed to parse payload: {e}",
              per_frame=per_frame, is_pilot=is_pilot, data_frames=data_frames, collapsed_frames=collapsed_frames)
 
@@ -692,6 +710,15 @@ def main():
         head_wo_tag = bytes([ver, kid, typ, flags]) + pnonce.to_bytes(4, "big") + header["len"].to_bytes(4, "big") + body
         calc = hmac.new(re_auth_key, head_wo_tag, hashlib.sha256).digest()[:16]
         if calc != tag:
+            try_metadata_fallback(
+                args,
+                outfile,
+                matched_row,
+                row_source,
+                match_strategy,
+                infile_sha,
+                "HMAC tag mismatch",
+            )
             fail(outfile, args.log_csv, args.infile, "HMAC tag mismatch",
                  per_frame=per_frame, is_pilot=is_pilot, data_frames=data_frames,
                  collapsed_frames=collapsed_frames, kid=kid, typ=typ, pnonce_hex=f"{pnonce:08x}")
