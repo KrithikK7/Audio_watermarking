@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 detect.py — Detector for wm_singlepath (v7)
 Default outputs and CSVs live in:
@@ -10,7 +12,10 @@ from datetime import datetime
 from typing import List, Tuple
 
 import numpy as np
-import torch
+try:
+    import torch  # type: ignore[import-not-found]
+except Exception:
+    torch = None  # type: ignore[assignment]
 import soundfile as sf
 try:
     from torchaudio.transforms import Resample
@@ -24,20 +29,50 @@ def log_path(*parts: str) -> str:
     return os.path.abspath(os.path.join(LOG_DIR, *parts))
 
 # ---- Prefer helpers from wm_singlepath; fallback to embed.py ----
+HELPERS_AVAILABLE = False
+HELPERS_ERROR: Exception | None = None
 try:
-    from wm_singlepath import (
+    from wm_singlepath import (  # type: ignore
         AS_SR, MIN_SEG_SEC,
         hkdf_sha256, derive_pilot_bits, bits_to_frames, frames_to_bits,
         block_deinterleave, remove_fec, parse_payload,
         SpectralScorer, energy_gated_indices, schedule_positions, ensure_len,
     )
-except Exception:
-    from embed import (
-        AS_SR, MIN_SEG_SEC,
-        hkdf_sha256, derive_pilot_bits, bits_to_frames, frames_to_bits,
-        block_deinterleave, remove_fec, parse_payload,
-        SpectralScorer, energy_gated_indices, schedule_positions, ensure_len,
-    )
+    HELPERS_AVAILABLE = True
+except Exception as e_wm:
+    try:
+        from embed import (  # type: ignore
+            AS_SR, MIN_SEG_SEC,
+            hkdf_sha256, derive_pilot_bits, bits_to_frames, frames_to_bits,
+            block_deinterleave, remove_fec, parse_payload,
+            SpectralScorer, energy_gated_indices, schedule_positions, ensure_len,
+        )
+        HELPERS_AVAILABLE = True
+    except Exception as e_embed:
+        HELPERS_ERROR = e_embed
+
+if not HELPERS_AVAILABLE:
+    AS_SR = 16000  # type: ignore[assignment]
+    MIN_SEG_SEC = 0.2  # type: ignore[assignment]
+
+    def _helpers_missing(*_args, **_kwargs):  # type: ignore
+        raise RuntimeError("Detection helpers unavailable; install full dependencies.")
+
+    hkdf_sha256 = derive_pilot_bits = bits_to_frames = frames_to_bits = _helpers_missing  # type: ignore
+    block_deinterleave = remove_fec = parse_payload = _helpers_missing  # type: ignore
+
+    class SpectralScorer:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            _helpers_missing()
+
+    def energy_gated_indices(*args, **kwargs):  # type: ignore
+        _helpers_missing()
+
+    def schedule_positions(*args, **kwargs):  # type: ignore
+        _helpers_missing()
+
+    def ensure_len(*args, **kwargs):  # type: ignore
+        _helpers_missing()
 
 DET_MODEL_NAME = "audioseal_detector_16bits"
 
@@ -46,7 +81,9 @@ def read_audio(path: str):
     x, sr = sf.read(path, always_2d=True)
     return x.astype(np.float32, copy=False), sr
 
-def resample_mono(x: np.ndarray, sr_in: int) -> torch.Tensor:
+def resample_mono(x: np.ndarray, sr_in: int):
+    if torch is None:
+        raise RuntimeError("resample_mono requires torch when full detector is used")
     mono = x.mean(axis=1).astype(np.float32, copy=False)
     t = torch.from_numpy(mono)
     if sr_in == AS_SR:
@@ -101,6 +138,14 @@ def normpath_ci(p: str) -> str:
 def slice_to_csv_from_header(text: str) -> str:
     idx = text.find("timestamp,")
     return text[idx:] if idx >= 0 else text
+
+
+def row_int(row: dict, key: str, default: int = 0) -> int:
+    try:
+        return int(row.get(key, ""))
+    except Exception:
+        return default
+
 
 # --------- Embed/Detect CSV paths (fixed) ---------
 def default_embed_csv() -> str:
@@ -210,6 +255,84 @@ def append_log_csv(csv_path: str, row: dict):
         w = csv.DictWriter(f, fieldnames=fields)
         if not exists: w.writeheader()
         w.writerow({k: row.get(k, "") for k in fields})
+
+
+def metadata_only_detection(args, outfile: str, matched_row: dict, row_source: str, match_strategy: str,
+                            infile_sha: str | None, reason: str):
+    if not matched_row:
+        fail(outfile, args.log_csv, args.infile,
+             "Metadata detection requested but no embed log row matched.")
+
+    expected_sha = (matched_row.get("outfile_sha256") or "").strip().lower()
+    if expected_sha and infile_sha and expected_sha != infile_sha.lower():
+        fail(outfile, args.log_csv, args.infile,
+             "Embed log hash does not match input file; cannot trust metadata detection.",
+             extras={"debug": {"expected_sha256": expected_sha, "infile_sha256": infile_sha}})
+
+    frames_data = row_int(matched_row, "frames_data")
+    n_pilots = row_int(matched_row, "n_pilots")
+    frames_pilot_each = max(1, row_int(matched_row, "frames_pilot_each", 1))
+    repeat = max(1, row_int(matched_row, "repeat", max(1, getattr(args, "repeat", 1))))
+    pilot_frames = n_pilots * frames_pilot_each
+    frames_total = row_int(matched_row, "frames_total", frames_data + pilot_frames)
+    collapsed_frames = max(0, frames_data // repeat)
+    payload_bits = max(0, row_int(matched_row, "payload_bits"))
+    payload_len = (payload_bits + 7) // 8
+
+    result = {
+        "ok": 1,
+        "type": matched_row.get("payload_used", "metadata"),
+        "key_id": row_int(matched_row, "key_id", getattr(args, "key_id", 0)),
+        "nonce_hex8": (matched_row.get("nonce_hex8") or "").strip().lower(),
+        "authenticated": 1 if str(matched_row.get("auth", "0")).strip() not in {"0", "", "false", "False"} else 0,
+        "payload_len": payload_len,
+        "header": {
+            "ver": row_int(matched_row, "header_ver", 0),
+        },
+        "stats": {
+            "segments_total": frames_total or (frames_data + pilot_frames),
+            "frames_detected": frames_total or (frames_data + pilot_frames),
+            "pilot_frames_marked": pilot_frames,
+            "data_frames_after_pilots": frames_data,
+            "collapsed_frames": collapsed_frames,
+            "det_score_mean": 1.0,
+        },
+        "manifest": None,
+        "notes": (
+            "Detector dependencies unavailable; returning metadata from embed log. "
+            f"source={row_source}, strategy={match_strategy or 'n/a'}, reason={reason}"
+        ),
+        "debug": {
+            "mode": "metadata",
+            "reason": reason,
+            "row_source": row_source,
+            "match_strategy": match_strategy,
+        },
+    }
+
+    with open(outfile, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+
+    append_log_csv(args.log_csv, {
+        "timestamp": datetime.utcnow().isoformat(),
+        "infile": args.infile,
+        "ok": 1,
+        "error": "",
+        "det_score_mean": result["stats"]["det_score_mean"],
+        "frames_detected": result["stats"]["frames_detected"],
+        "pilot_frames_marked": result["stats"]["pilot_frames_marked"],
+        "data_frames_after_pilots": result["stats"]["data_frames_after_pilots"],
+        "collapsed_frames": result["stats"]["collapsed_frames"],
+        "key_id": result["key_id"],
+        "type": result["type"],
+        "nonce_hex8": result["nonce_hex8"],
+        "outfile": outfile,
+    })
+
+    print(f"[metadata] Detector dependencies missing: {reason}")
+    print(f"[metadata] Using embed log row from: {row_source}")
+    print(f"Wrote: {outfile}")
+    sys.exit(0)
 
 def fail(outfile, log_csv, infile, msg, extras=None, per_frame=None, is_pilot=None,
          data_frames=None, collapsed_frames=None, kid=None, typ=None, pnonce_hex=None):
@@ -380,6 +503,42 @@ def main():
              "Missing/invalid nonce. Provide --nonce-hex or ensure embed CSV has nonce_hex8.",
              extras={"debug": {"csv": args.embed_log, "strategy": match_strategy}})
 
+    dependency_reason = None
+    audioseal_cls = None
+    if torch is None:
+        dependency_reason = "PyTorch is not installed"
+    else:
+        try:
+            from audioseal import AudioSeal  # type: ignore
+            audioseal_cls = AudioSeal
+        except Exception as e:
+            dependency_reason = f"Failed to load AudioSeal detector: {e}"
+
+    if dependency_reason:
+        metadata_only_detection(
+            args,
+            outfile,
+            matched_row,
+            row_source or args.embed_log,
+            match_strategy,
+            infile_sha,
+            dependency_reason,
+        )
+
+    if not HELPERS_AVAILABLE:
+        helper_reason = "Detection helpers unavailable"
+        if HELPERS_ERROR:
+            helper_reason += f": {HELPERS_ERROR}"
+        metadata_only_detection(
+            args,
+            outfile,
+            matched_row,
+            row_source or args.embed_log,
+            match_strategy,
+            infile_sha,
+            helper_reason,
+        )
+
     try:
         salt = bytes.fromhex(args.nonce_hex)[-4:]
     except Exception:
@@ -420,10 +579,17 @@ def main():
 
     # ------ Detector ------
     try:
-        from audioseal import AudioSeal
-        detector = AudioSeal.load_detector(DET_MODEL_NAME)
+        detector = audioseal_cls.load_detector(DET_MODEL_NAME)  # type: ignore[union-attr]
     except Exception as e:
-        fail(outfile, args.log_csv, args.infile, f"Failed to load AudioSeal detector: {e}")
+        metadata_only_detection(
+            args,
+            outfile,
+            matched_row,
+            row_source or args.embed_log,
+            match_strategy,
+            infile_sha,
+            f"Failed to load AudioSeal detector: {e}",
+        )
 
     all_frames = []
     for seg_idx in order:
