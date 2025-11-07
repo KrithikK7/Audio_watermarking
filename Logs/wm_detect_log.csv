@@ -1,0 +1,2 @@
+timestamp,infile,ok,error,det_score_mean,frames_detected,pilot_frames_marked,data_frames_after_pilots,collapsed_frames,key_id,type,nonce_hex8,outfile
+2025-11-07T22:07:07.571116,B:\Krithik\Project\Audio_watermarking\Logs\streamlit_runs\detect\detect_20251107_220701_5b25f9\watermarked.wav,0,0 pilot frames matched. Nonce or params likely wrong.,0.8236,4,0,0,0,,,,B:\Krithik\Project\Audio_watermarking\Logs\streamlit_runs\detect\detect_20251107_220701_5b25f9\watermarked.wm.json

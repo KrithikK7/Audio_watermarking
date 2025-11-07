@@ -100,6 +100,7 @@ No watermark detected. No message to decode.
 
 1)Ensure all files (embed.py, detect.py, my_song.wav) are in the same directory.
 
-2)The metadata_log.csv file stores all past watermark records for easy reference.
+2)The metadata_log.csv file stores all past watermark records for easy reference.  
+   - The Streamlit UI writes to `streamlit_wm_log.csv` and automatically reuses this log during detection so the correct nonce and parameters are pulled in. Keep this file alongside the app or supply a manual `--nonce-hex` if you delete it.
 
 3)Modify my_song.wav to test with other audio samples.

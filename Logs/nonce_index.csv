@@ -1,0 +1,2 @@
+timestamp,outfile,outfile_sha256,nonce_hex8,seg,repeat,sync_every,pilot_bits,fec,interleave_depth,frames_total,frames_data,frames_pilot_each,n_pilots,payload_bits,cap_bits
+2025-11-08 03:36:44,B:\Krithik\Project\Audio_watermarking\Logs\streamlit_runs\embed\embed_20251107_220619_724fb8\watermarked.wav,28e877c2eeb9f615e412607e7370dca3950d5e9c2c2363bae06b27926895d05b,80d545a1,0.2,1,8,16,none,8,30,25,1,5,400,448
