@@ -465,7 +465,6 @@ def main():
         per_frame = sorted_all[:take_n]
         used_threshold = None
 
-    per_frame.sort(key=lambda t: t[0])
     frame_debug = {
         "frames_total_est": frames_total_est,
         "frames_selected": len(per_frame),
