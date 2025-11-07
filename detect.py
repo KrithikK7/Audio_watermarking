@@ -334,22 +334,6 @@ def metadata_only_detection(args, outfile: str, matched_row: dict, row_source: s
     print(f"Wrote: {outfile}")
     sys.exit(0)
 
-
-def try_metadata_fallback(args, outfile: str, matched_row: dict | None, row_source: str | None,
-                          match_strategy: str | None, infile_sha: str | None, reason: str) -> None:
-    """Invoke metadata-only detection when we have a trusted embed row to lean on."""
-    if not matched_row:
-        return
-    metadata_only_detection(
-        args,
-        outfile,
-        matched_row,
-        row_source or args.embed_log,
-        match_strategy or "",
-        infile_sha,
-        reason,
-    )
-
 def fail(outfile, log_csv, infile, msg, extras=None, per_frame=None, is_pilot=None,
          data_frames=None, collapsed_frames=None, kid=None, typ=None, pnonce_hex=None):
     result = {"ok": 0, "error": msg}
