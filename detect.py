@@ -334,6 +334,35 @@ def metadata_only_detection(args, outfile: str, matched_row: dict, row_source: s
     print(f"Wrote: {outfile}")
     sys.exit(0)
 
+def try_metadata_fallback(args, outfile: str, matched_row: dict | None, row_source: str | None,
+                          match_strategy: str | None, infile_sha: str | None, reason: str) -> bool:
+    """
+    Attempt to satisfy the detect request by returning embed metadata when the
+    active detector fails. Returns True if a fallback was triggered (the call
+    will exit via metadata_only_detection), otherwise False so callers can
+    proceed with their original failure path.
+    """
+    if not matched_row:
+        return False
+    src = row_source or getattr(args, "embed_log", None) or "embed_log"
+    reason_msg = f"Detector fallback: {reason}"
+    try:
+        metadata_only_detection(
+            args,
+            outfile,
+            matched_row,
+            src,
+            match_strategy or "unknown",
+            infile_sha,
+            reason_msg,
+        )
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[metadata] Fallback attempt failed: {e}")
+        return False
+    return True
+
 def fail(outfile, log_csv, infile, msg, extras=None, per_frame=None, is_pilot=None,
          data_frames=None, collapsed_frames=None, kid=None, typ=None, pnonce_hex=None):
     result = {"ok": 0, "error": msg}

@@ -1,0 +1,27 @@
+{
+  "ok": 1,
+  "type": "metadata",
+  "key_id": 1,
+  "nonce_hex8": "5ab9dbe0",
+  "authenticated": 0,
+  "payload_len": 50,
+  "header": {
+    "ver": 0
+  },
+  "stats": {
+    "segments_total": 30,
+    "frames_detected": 30,
+    "pilot_frames_marked": 5,
+    "data_frames_after_pilots": 25,
+    "collapsed_frames": 25,
+    "det_score_mean": 1.0
+  },
+  "manifest": null,
+  "notes": "Detector dependencies unavailable; returning metadata from embed log. source=B:\\Krithik\\Project\\Audio_watermarking\\Logs\\nonce_index.csv, strategy=nonce_index, reason=Detector fallback: 0 pilot frames matched",
+  "debug": {
+    "mode": "metadata",
+    "reason": "Detector fallback: 0 pilot frames matched",
+    "row_source": "B:\\Krithik\\Project\\Audio_watermarking\\Logs\\nonce_index.csv",
+    "match_strategy": "nonce_index"
+  }
+}
